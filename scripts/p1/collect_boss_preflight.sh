@@ -5,6 +5,10 @@
 #
 # Optional: --root <dir> (repeatable, overrides auto-discovery)  --models-volume <dir>
 #           --probe-endpoint <http://127.0.0.1:PORT/PATH> (repeatable; GET, localhost, allowlisted paths)
+#           --approved-root <dir> (repeatable; required container for --exact-file)
+#           --exact-file <path> (repeatable; absolute, no symlink, no glob, must resolve inside an
+#                                --approved-root; model-payload extensions rejected before any read)
+#           --exact-files-only (disables directory auto-discovery entirely; search_scope.roots == [])
 #
 # Writes ONLY inside --output. Does not: modify BOSS files/registries/Git/env/launchd, start or kill
 # processes, load/unload models, install packages, change permissions, or touch the network beyond
@@ -17,9 +21,11 @@ OUT=""; PASS_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --output) OUT="${2:-}"; shift 2 ;;
-    --root|--models-volume|--probe-endpoint|--max-depth|--max-files|--max-copy-bytes|--max-hash-bytes)
+    --root|--models-volume|--probe-endpoint|--max-depth|--max-files|--max-copy-bytes|--max-hash-bytes|--approved-root|--exact-file)
       PASS_ARGS+=("$1" "${2:-}"); shift 2 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    --exact-files-only)
+      PASS_ARGS+=("$1"); shift 1 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "COLLECTION_STATUS=FAILED"; echo "REASON=unknown argument: $1"; exit 2 ;;
   esac
 done

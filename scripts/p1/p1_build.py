@@ -342,6 +342,88 @@ def write_inventory(b, inventory, models_volume):
                notes=f"model payload files found under discovered roots/{models_volume}: path/size/mtime only, never hashed")
 
 
+def validate_exact_files(exact_files, approved_roots):
+    """Validate --exact-file candidates. Exits (fail-closed) on any violation; never reads
+    file content here -- model-payload rejection and containment happen before any open()."""
+    validated = []
+    for f in exact_files:
+        if not os.path.isabs(f):
+            sys.exit(f"ERROR: --exact-file must be an absolute path: {f}")
+        if os.path.islink(f):
+            sys.exit(f"ERROR: --exact-file must not be a symlink: {f}")
+        if not os.path.isfile(f):
+            sys.exit(f"ERROR: --exact-file does not exist or is not a regular file: {f}")
+        ext = os.path.splitext(f)[1].lower()
+        if ext in MODEL_PAYLOAD_EXT:
+            sys.exit(f"ERROR: --exact-file rejected, model payload extension forbidden: {f}")
+        real = os.path.realpath(f)
+        if not approved_roots or not any(
+                real == ar or real.startswith(ar.rstrip("/") + "/") for ar in approved_roots):
+            sys.exit(f"ERROR: --exact-file does not resolve inside any --approved-root: {f}")
+        validated.append(real)
+    return validated
+
+
+def collect_exact_files(b, exact_files):
+    """Capture explicitly-named files only. Text: existing redaction path, hashed.
+    Binary/non-text: metadata only, never opened, never hashed."""
+    for p in exact_files:
+        st = os.stat(p)
+        common = dict(source_path=p, source_size_bytes=st.st_size, mtime_utc=utc(st.st_mtime))
+        if NEVER_READ_NAME_RE.search(p):
+            b.add(category="GOVERNED_FILE_INTEGRITY", artifact_type="file_record",
+                  collection_class="file_never_read", sanitization_status="not_copied_never_read",
+                  success=True, required=False,
+                  notes="exact_file_capture=true; credential-like file name: path/size/mtime only, never opened",
+                  **common)
+            continue
+        if ENV_FILE_RE.search(p):
+            try:
+                with open(p, encoding="utf-8", errors="replace") as f:
+                    names = [m.group(2) for m in (re.match(r"^\s*(export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=", l)
+                                                  for l in f) if m]
+            except OSError:
+                names = []
+            rel_out = f"artifacts/exact_files/{sha256_bytes(p.encode())[:10]}__{safe_name(os.path.basename(p))}.txt"
+            e = b.add_text(rel_out, "".join(f"{n}=<REDACTED>\n" for n in names) or "# no assignments\n",
+                       category="GOVERNED_FILE_INTEGRITY", artifact_type="env_keys",
+                       collection_class="file_copy_sanitized", success=True, required=False,
+                       item_count=len(names),
+                       notes="exact_file_capture=true; key NAMES only; values never read into the bundle",
+                       **common)
+            e["sanitization_status"] = "names_only"
+            continue
+        ext = os.path.splitext(p)[1].lower()
+        if ext in TEXT_EXT and looks_text(p):
+            try:
+                text = open(p, encoding="utf-8", errors="replace").read()
+            except OSError as ex:
+                b.add(category="GOVERNED_FILE_INTEGRITY", artifact_type=artifact_type(p),
+                      collection_class="file_copy_sanitized", success=False,
+                      sanitization_status="not_applicable", required=False,
+                      notes=f"exact_file_capture=true; read failed: {ex}", **common)
+                continue
+            src_hash = sha256_file(p)
+            if has_private_key_block(text):
+                b.add(category="GOVERNED_FILE_INTEGRITY", artifact_type=artifact_type(p),
+                      collection_class="file_hash_only", success=True, source_sha256=src_hash,
+                      sanitization_status="withheld_secret_material", required=False,
+                      notes="exact_file_capture=true; private key block detected: file withheld", **common)
+                continue
+            rel_out = f"artifacts/exact_files/{sha256_bytes(p.encode())[:10]}__{safe_name(os.path.basename(p))}.txt"
+            b.add_text(rel_out, text, category="GOVERNED_FILE_INTEGRITY", artifact_type=artifact_type(p),
+                       collection_class="file_copy_sanitized", success=True, required=False,
+                       source_sha256=src_hash, notes="exact_file_capture=true", **common)
+        else:
+            meta_obj = {"source_path": p, "source_size_bytes": st.st_size, "mtime_utc": utc(st.st_mtime),
+                        "content_read": False, "content_hashed": False}
+            rel_out = f"artifacts/exact_files_meta/{sha256_bytes(p.encode())[:10]}__{safe_name(os.path.basename(p))}.json"
+            b.add_text(rel_out, json.dumps(meta_obj, indent=2) + "\n",
+                       category="GOVERNED_FILE_INTEGRITY", artifact_type="file_record",
+                       collection_class="metadata", success=True, required=False, source_sha256=None,
+                       notes="exact_file_capture=true; content_read=false; content_hashed=false", **common)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--output", required=True)
@@ -352,12 +434,28 @@ def main():
     ap.add_argument("--max-files", type=int, default=400)
     ap.add_argument("--max-copy-bytes", type=int, default=262_144)
     ap.add_argument("--max-hash-bytes", type=int, default=67_108_864)
+    ap.add_argument("--approved-root", action="append", default=[])
+    ap.add_argument("--exact-file", action="append", default=[])
+    ap.add_argument("--exact-files-only", action="store_true")
     a = ap.parse_args()
 
     out = os.path.abspath(a.output)
     if os.path.exists(out) and (not os.path.isdir(out) or os.listdir(out)):
         sys.exit(f"ERROR: output dir exists and is not empty: {out}")
-    roots, notes = discover_roots(a.root, a.models_volume)
+
+    approved_roots = [os.path.realpath(r) for r in a.approved_root]
+    out_real = os.path.realpath(out)
+    for ar in approved_roots:
+        if not os.path.isdir(ar):
+            sys.exit(f"ERROR: --approved-root is not a directory: {ar}")
+        if out_real == ar or out_real.startswith(ar.rstrip("/") + "/") or ar.startswith(out_real.rstrip("/") + "/"):
+            sys.exit(f"ERROR: output dir must be outside every approved root (read-only contract): {out} vs {ar}")
+    validated_exact_files = validate_exact_files(a.exact_file, approved_roots)
+
+    if a.exact_files_only:
+        roots, notes = [], ["exact-files-only mode: directory auto-discovery disabled"]
+    else:
+        roots, notes = discover_roots(a.root, a.models_volume)
     for r in roots:
         if out == r or out.startswith(r.rstrip("/") + "/") or r.startswith(out.rstrip("/") + "/"):
             sys.exit(f"ERROR: output dir must be outside every searched root (read-only contract): {out} vs {r}")
@@ -370,10 +468,14 @@ def main():
              "hidden_dirs_pruned": True, "max_depth": a.max_depth, "max_files": a.max_files,
              "max_copy_bytes": a.max_copy_bytes, "max_hash_bytes": a.max_hash_bytes,
              "models_volume": a.models_volume, "models_volume_present": os.path.isdir(a.models_volume),
-             "model_payload_extensions_never_read": sorted(MODEL_PAYLOAD_EXT), "truncated": False}
+             "model_payload_extensions_never_read": sorted(MODEL_PAYLOAD_EXT), "truncated": False,
+             "approved_roots": approved_roots, "exact_files": validated_exact_files,
+             "exact_files_only": a.exact_files_only}
     run_runtime(b)
     probe_endpoints(b, DEFAULT_PROBES + a.probe_endpoint)
-    inventory = collect_files(b, roots, a, scope)
+    inventory = [] if a.exact_files_only else collect_files(b, roots, a, scope)
+    if validated_exact_files:
+        collect_exact_files(b, validated_exact_files)
     write_inventory(b, inventory, a.models_volume)
     b.add_text("meta/search_scope.json", json.dumps(scope, indent=2, sort_keys=True) + "\n",
                category="COLLECTION_META", artifact_type="search_scope", collection_class="metadata",
