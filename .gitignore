@@ -1,0 +1,5 @@
+# P1 evidence bundles may contain host-derived material: never commit them to this PUBLIC repo.
+evidence/p1/*
+!evidence/p1/.gitkeep
+*.tar.gz
+__pycache__/

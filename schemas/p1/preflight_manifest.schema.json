@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "boss-p1-preflight-manifest-1.0",
+  "title": "BOSS P1 preflight evidence manifest",
+  "description": "Authoritative structural contract for manifest.json. verify_preflight_bundle.py enforces this natively (stdlib only) plus: hashes, file existence, zero-byte required artifacts, bundle-escape paths, undeclared files, secret scan.",
+  "type": "object",
+  "required": ["schema_version", "collector_version", "collection_timestamp", "host_id", "output_root", "search_scope", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "collector_version": {"type": "string"},
+    "collection_timestamp": {"type": "string", "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ$"},
+    "host_id": {"type": "string", "pattern": "^host-[0-9a-f]{12}$", "description": "Hash prefix; hostname is never recorded."},
+    "output_root": {"type": "string"},
+    "search_scope": {"type": "object", "description": "Roots, excluded names and caps actually used."},
+    "entries": {"type": "array", "items": {"$ref": "#/$defs/entry"}}
+  },
+  "$defs": {
+    "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "entry": {
+      "type": "object",
+      "required": ["id", "category", "artifact_type", "collection_class", "sanitization_status", "success", "required", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^E\\d{4,}$"},
+        "source_path": {"type": ["string", "null"], "description": "Original host path, or the fixed command/URL for runtime entries."},
+        "bundle_path": {"type": ["string", "null"], "description": "Relative path inside the bundle; never absolute, never containing '..'."},
+        "category": {"enum": ["COLLECTION_META", "TOPOLOGY", "ROLE_PROVIDER_REFERENCES", "ROUTING", "CROSS_PROJECT_DEPENDENCIES", "MCP_TOOL_SURFACE", "GOVERNED_FILE_INTEGRITY", "RUNTIME_RESOURCE", "PROTECTED_ASSET_INVENTORY", "ACCEPTED_PROJECT_EVIDENCE"]},
+        "artifact_type": {"enum": ["config", "registry", "manifest", "code", "doc", "launchd_plist", "env_keys", "runtime_command", "endpoint_probe", "reference_index", "model_inventory", "search_scope", "host_meta", "file_record"]},
+        "sha256": {"$ref": "#/$defs/sha256", "description": "SHA-256 of the artifact AS STORED in the bundle (sanitized)."},
+        "source_sha256": {"$ref": "#/$defs/sha256", "description": "SHA-256 of the original source bytes (governed-file integrity). Null for env/secret-like/oversized files."},
+        "size_bytes": {"type": ["integer", "null"], "minimum": 0, "description": "Size of the artifact as stored in the bundle."},
+        "source_size_bytes": {"type": ["integer", "null"], "minimum": 0, "description": "Size of the original host file."},
+        "mtime_utc": {"type": ["string", "null"]},
+        "item_count": {"type": ["integer", "null"], "minimum": 0, "description": "Hits/rows for index and inventory artifacts; 0 means present but empty (does not count toward coverage)."},
+        "sanitization_status": {"enum": ["clean", "redacted", "names_only", "withheld_secret_material", "not_copied_hash_only", "not_copied_never_read", "not_applicable"]},
+        "collection_class": {"enum": ["file_copy_sanitized", "file_hash_only", "file_never_read", "grep_references", "safe_command", "localhost_get", "metadata"]},
+        "success": {"type": "boolean"},
+        "required": {"type": "boolean"},
+        "notes": {"type": "string"}
+      }
+    }
+  }
+}
