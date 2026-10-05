@@ -57,7 +57,7 @@ Everything under `P1_EVIDENCE_REQUIREMENTS.md` §2 and gates G1–G11: live topo
 ## 6. Next executable action (Mac mini)
 
 ```bash
-bash scripts/p1/collect_boss_preflight.sh --output "$HOME/boss_p1_evidence/$(date -u +%Y%m%dT%H%M%SZ)"
+bash scripts/p1/collect_boss_preflight.sh --output "$HOME/p1_host_evidence/$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
 Then hand the resulting directory (or the `.tar.gz` from the printed `ARCHIVE_COMMAND`) to the P1 session **privately** — not via this public repo.

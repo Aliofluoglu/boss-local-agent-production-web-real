@@ -25,7 +25,7 @@ while [ $# -gt 0 ]; do
 done
 if [ -z "$OUT" ]; then
   echo "COLLECTION_STATUS=FAILED"
-  echo "REASON=--output <dir> is required, e.g. --output \"\$HOME/boss_p1_evidence/\$(date -u +%Y%m%dT%H%M%SZ)\""
+  echo "REASON=--output <dir> is required, e.g. --output \"\$HOME/p1_host_evidence/\$(date -u +%Y%m%dT%H%M%SZ)\" (use a name that won't match auto-discovery tokens boss|herdr|local_agent|atr)"
   exit 2
 fi
 if ! command -v python3 >/dev/null 2>&1; then

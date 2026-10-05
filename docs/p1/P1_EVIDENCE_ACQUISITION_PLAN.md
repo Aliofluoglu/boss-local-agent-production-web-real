@@ -5,10 +5,10 @@ Goal: get the minimum safe, sanitized, verifiable evidence from the real Mac min
 ## 1. The single command (run on the Mac mini, from a checkout of this control repo)
 
 ```bash
-bash scripts/p1/collect_boss_preflight.sh --output "$HOME/boss_p1_evidence/$(date -u +%Y%m%dT%H%M%SZ)"
+bash scripts/p1/collect_boss_preflight.sh --output "$HOME/p1_host_evidence/$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
-Output-directory convention: `$HOME/boss_p1_evidence/<UTC-timestamp>/` — must not exist or must be empty, and must be **outside** every searched root (the script refuses otherwise). Do not use a path inside this repo's tracked tree; `evidence/p1/*` is git-ignored as a last-resort guard.
+Output-directory convention: `$HOME/p1_host_evidence/<UTC-timestamp>/` — must not exist or must be empty, and must be **outside** every searched root (the script refuses otherwise). Do not use a path inside this repo's tracked tree; `evidence/p1/*` is git-ignored as a last-resort guard. Use a neutral name here, not one containing `boss`/`herdr`/`local_agent`/`atr` — a prior output directory matching those tokens will itself be auto-discovered as a search root on the *next* run and the script will then correctly refuse to write inside it. For repeat collections, either (A) pass explicit `--root`/`--models-volume` so discovery is fixed and predictable, or (B) keep using an output directory whose name doesn't match the auto-discovery tokens.
 
 The script collects, verifies, and prints:
 

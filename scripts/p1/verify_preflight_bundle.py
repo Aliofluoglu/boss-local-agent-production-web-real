@@ -21,6 +21,21 @@ TOP_REQUIRED = {"schema_version": str, "collector_version": str, "collection_tim
                 "host_id": str, "output_root": str, "search_scope": dict, "entries": list}
 ENTRY_REQUIRED = {"id": str, "category": str, "artifact_type": str, "collection_class": str,
                   "sanitization_status": str, "success": bool, "required": bool, "notes": str}
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+def is_legit_empty_source_copy(e):
+    """Narrow exception for a zero-byte artifact that is a verified, exact copy of a
+    zero-byte source file (e.g. an empty __init__.py). Every other zero-byte artifact
+    — required, generated/runtime, wrong-provenance, or wrong-hash — still fails."""
+    return (
+        e.get("required") is False
+        and e.get("success") is True
+        and e.get("collection_class") == "file_copy_sanitized"
+        and e.get("source_size_bytes") == 0
+        and e.get("source_sha256") == EMPTY_SHA256
+        and e.get("sha256") == EMPTY_SHA256
+    )
 
 
 def validate_manifest(m, problems):
@@ -79,7 +94,7 @@ def check_files(bundle, m, problems):
             problems.append(f"{tag}: MISSING file {bp}")
             continue
         size = os.path.getsize(full)
-        if size == 0 and (e.get("required") or e.get("success")):
+        if size == 0 and (e.get("required") or e.get("success")) and not is_legit_empty_source_copy(e):
             problems.append(f"{tag}: zero-byte artifact {bp}")
         if e.get("size_bytes") is not None and e["size_bytes"] != size:
             problems.append(f"{tag}: size mismatch for {bp} (declared {e['size_bytes']}, actual {size})")
